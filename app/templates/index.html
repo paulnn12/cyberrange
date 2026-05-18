@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prompt</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: monospace;
+    background: #0d0d0d;
+    color: #e0e0e0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  .container { width: 100%; max-width: 720px; }
+  h1 { font-size: 1rem; color: #555; margin-bottom: 28px; letter-spacing: 0.1em; }
+
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 0.78rem; color: #555; margin-bottom: 6px; }
+
+  select, input, textarea {
+    width: 100%;
+    background: #141414;
+    border: 1px solid #2a2a2a;
+    color: #ddd;
+    font-family: monospace;
+    font-size: 0.9rem;
+    padding: 9px 11px;
+    border-radius: 3px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  select:focus, input:focus, textarea:focus { border-color: #444; }
+
+  .row { display: flex; gap: 10px; }
+  .row .field { flex: 1; }
+
+  #ollama-section { display: none; }
+  #ollama-section.visible { display: block; }
+
+  textarea { height: 150px; resize: vertical; }
+
+  button {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    color: #bbb;
+    font-family: monospace;
+    font-size: 0.9rem;
+    padding: 10px 22px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  button:hover { background: #222; border-color: #444; }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  #status { margin-top: 12px; font-size: 0.78rem; color: #4a4a4a; min-height: 1.1em; }
+  #status.ok { color: #4a7c4a; }
+  #status.err { color: #7c4a4a; }
+
+  #output, #exec-output {
+    display: none;
+    background: #0f0f0f;
+    border: 1px solid #1e1e1e;
+    border-radius: 3px;
+    padding: 14px;
+    white-space: pre-wrap;
+    font-size: 0.83rem;
+    line-height: 1.55;
+  }
+  #output { margin-top: 20px; color: #999; }
+  #exec-output { display: block; color: #7aab7a; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>// prompt</h1>
+
+  <div class="field">
+    <label>backend</label>
+    <select id="backend" onchange="toggleBackend()">
+      <option value="anthropic">anthropic</option>
+      <option value="ollama">ollama</option>
+    </select>
+  </div>
+
+  <div id="ollama-section">
+    <div class="row">
+      <div class="field">
+        <label>ip</label>
+        <input id="ollama-ip" placeholder="192.168.1.10" />
+      </div>
+      <div class="field">
+        <label>port</label>
+        <input id="ollama-port" placeholder="11434" value="11434" />
+      </div>
+    </div>
+    <div class="field">
+      <label>modèle</label>
+      <input id="ollama-model" placeholder="llama3" />
+    </div>
+  </div>
+
+  <div class="field">
+    <label>prompt <span style="color:#333">— Ctrl+Entrée pour envoyer</span></label>
+    <textarea id="prompt" placeholder="…"></textarea>
+  </div>
+
+  <button id="send-btn" onclick="send()">envoyer</button>
+  <div id="status"></div>
+  <pre id="output"></pre>
+  <div id="exec-block" style="display:none">
+    <div style="font-size:0.78rem;color:#555;margin-top:18px;margin-bottom:6px;">sortie exécution</div>
+    <pre id="exec-output"></pre>
+  </div>
+</div>
+
+<script>
+  function toggleBackend() {
+    const v = document.getElementById('backend').value;
+    document.getElementById('ollama-section').classList.toggle('visible', v === 'ollama');
+  }
+
+  async function send() {
+    const btn = document.getElementById('send-btn');
+    const status = document.getElementById('status');
+    const output = document.getElementById('output');
+    const prompt = document.getElementById('prompt').value.trim();
+
+    status.className = '';
+    if (!prompt) { status.textContent = 'prompt vide.'; return; }
+
+    const backend = document.getElementById('backend').value;
+    const payload = { backend, prompt };
+
+    if (backend === 'ollama') {
+      payload.ip    = document.getElementById('ollama-ip').value.trim();
+      payload.port  = document.getElementById('ollama-port').value.trim();
+      payload.model = document.getElementById('ollama-model').value.trim();
+      if (!payload.ip || !payload.model) {
+        status.textContent = 'IP et modèle requis.';
+        return;
+      }
+    }
+
+    btn.disabled = true;
+    output.style.display = 'none';
+    document.getElementById('exec-block').style.display = 'none';
+    status.textContent = 'envoi…';
+
+    try {
+      const res  = await fetch('/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (data.error) {
+        status.className = 'err';
+        status.textContent = 'erreur : ' + data.error;
+      } else {
+        status.className = 'ok';
+        status.textContent = `exécuté → output/${data.saved_as}`;
+        output.textContent = data.response;
+        output.style.display = 'block';
+        const execBlock = document.getElementById('exec-block');
+        const execOut   = document.getElementById('exec-output');
+        execOut.textContent = data.exec_output || '(aucune sortie)';
+        execBlock.style.display = 'block';
+      }
+    } catch (e) {
+      status.className = 'err';
+      status.textContent = 'erreur réseau : ' + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  document.getElementById('prompt').addEventListener('keydown', e => {
+    if (e.ctrlKey && e.key === 'Enter') send();
+  });
+</script>
+</body>
+</html>

@@ -4,8 +4,8 @@ import requests
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Prompt de contexte injecté avant chaque message utilisateur.
-# Modifiez cette variable pour changer le comportement du LLM.
+# System prompt injected before every user message.
+# Edit system_prompt.md to change the LLM's behaviour.
 # ---------------------------------------------------------------------------
 SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text(encoding="utf-8")
 # ---------------------------------------------------------------------------
@@ -14,7 +14,7 @@ SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text(encoding=
 def query_anthropic(prompt: str) -> str:
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY non définie")
+        raise ValueError("ANTHROPIC_API_KEY is not set")
 
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
@@ -27,8 +27,8 @@ def query_anthropic(prompt: str) -> str:
 
 
 def query_ollama(prompt: str, ip: str, port: str, model: str) -> str:
-    # /api/chat permet de passer system séparément (meilleure inférence que la
-    # concaténation dans le prompt) et d'éviter de saturer le contexte utilisateur.
+    # /api/chat keeps the system prompt separate from the user turn,
+    # which improves inference quality vs. concatenating into the prompt field.
     url = f"http://{ip}:{port}/api/chat"
     response = requests.post(
         url,
@@ -40,8 +40,8 @@ def query_ollama(prompt: str, ip: str, port: str, model: str) -> str:
                 {"role": "user",   "content": prompt},
             ],
             "options": {
-                # Fenêtre de contexte large pour absorber le system prompt volumineux.
-                # La plupart des modèles récents supportent 32 k+; réduire si OOM.
+                # Large context window to fit the system prompt.
+                # Reduce to 16384 if the model runs out of memory.
                 "num_ctx":     32768,
                 "num_predict": 16000,
                 "temperature": 0.2,

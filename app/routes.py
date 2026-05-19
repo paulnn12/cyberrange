@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 from datetime import datetime
 from flask import Blueprint, render_template, request, jsonify
@@ -9,6 +10,12 @@ bp = Blueprint("main", __name__)
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output")
 
 
+def _strip_markdown_fences(text: str) -> str:
+    """Retire les blocs ```bash ... ``` ou ``` ... ``` qu'un LLM peut ajouter."""
+    match = re.search(r"```(?:bash|sh)?\n(.*?)```", text, re.DOTALL)
+    return match.group(1).strip() if match else text.strip()
+
+
 def _save_and_run(text: str) -> tuple[str, str]:
     """Écrit le script dans output/ et l'exécute depuis ce répertoire."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -16,7 +23,7 @@ def _save_and_run(text: str) -> tuple[str, str]:
     path = os.path.join(OUTPUT_DIR, filename)
 
     with open(path, "w") as f:
-        f.write(text)
+        f.write(_strip_markdown_fences(text))
     os.chmod(path, 0o755)
 
     result = subprocess.run(
@@ -59,10 +66,11 @@ def prompt():
         else:
             return jsonify({"error": "backend inconnu"}), 400
 
+        filename, exec_output = _save_and_run(response_text)
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    filename, exec_output = _save_and_run(response_text)
     return jsonify({
         "response": response_text,
         "saved_as": filename,

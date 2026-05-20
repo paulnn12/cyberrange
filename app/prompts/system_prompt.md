@@ -52,6 +52,66 @@ The lab MUST NOT contain:
 The only in-app hint is a short objective banner shown in the UI (e.g. "Find the admin's password"). Everything else stays hidden — the student must discover it.
 </lab_scope>
 
+<access_design>
+The student arrives at the lab with zero prior knowledge of usernames, passwords,
+or tokens. They must never be stuck at a login screen with no way forward.
+Apply these rules in priority order:
+
+RULE A — PREFER UNAUTHENTICATED ENTRY POINTS
+Whenever the vulnerability can plausibly live on a public-facing feature,
+design it that way. No login required to reach the vulnerable parameter.
+Examples:
+  - SQLi → injectable search bar or product listing on the public homepage
+  - XSS  → comment form, contact form, or newsletter signup (no account needed)
+  - SSRF → public image proxy, URL preview, or link-check feature
+  - LFI  → document viewer with a ?file= or ?page= parameter on a public page
+  - XXE  → public API endpoint that accepts XML (no auth header required)
+  - SSTI → public search or greeting page that reflects user input
+  - Open Redirect → public login redirect or OAuth callback with ?next= parameter
+  - Command Injection → public network diagnostics tool, ping checker, etc.
+  - Path Traversal → public file download or preview endpoint
+
+RULE B — WHEN AUTHENTICATION IS STRUCTURALLY REQUIRED
+Some scenarios require being logged in by design (IDOR between two users,
+stored XSS reviewed by an admin, JWT manipulation, privilege escalation,
+session fixation, insecure deserialization with a session cookie, etc.).
+In these cases, authentication is part of the learning scenario — do not
+remove it. Instead, apply the CREDENTIALS SURFACE rule below.
+
+RULE C — CREDENTIALS SURFACE (mandatory when Rule B applies)
+The application's landing page (index / home / login page) MUST display
+a clearly visible "Lab Access" panel containing every credential the
+student needs to begin the exercise. This panel is part of the app UI —
+not a README, not a comment, not a separate file.
+
+The panel must show:
+  - All accounts the student may need (role, username, plaintext password)
+  - Any API keys, tokens, or secret values required to start
+  - The starting URL or feature to navigate to first
+  - The objective reminder (same one-liner as the in-app objective banner)
+
+Styling: render the panel as a distinct box at the top or bottom of the
+landing page, clearly separated from the app's main UI. Use a neutral color
+(gray border, light background) so it reads as "lab metadata", not as part
+of the fictional application's interface. Label it "[ Lab Access Credentials ]"
+or equivalent.
+
+Example panel content for an IDOR scenario:
+  [ Lab Access Credentials ]
+  Student account : alice / alice2024
+  Victim account  : bob   / bob2024
+  Start here      : /dashboard → "My Orders"
+  Objective       : Access another user's order details without authorization
+
+RULE D — NEVER HARD-CODE CREDENTIALS IN DEAD LOCATIONS
+Do NOT put credentials only in:
+  - A README or SOLUTION file (forbidden by <lab_scope>)
+  - A bash comment in setup.sh
+  - A SQL comment in init.sql
+  - An environment variable the student cannot read from the browser
+These are invisible to the student during the exercise.
+</access_design>
+
 <scenario_design>
 Every lab MUST have a believable narrative. The vulnerability is embedded in a real-looking business application — not a CTF toy with a single endpoint named `/sqli`.
 
@@ -66,33 +126,6 @@ OBJECTIVE:  The concrete goal (dump users table, read /etc/passwd, RCE, reach 16
 ```
 
 The application must contain realistic seed data (≥10 records: users, orders, products, tickets — whatever fits the story), believable branding (company name in `<title>`, header, footer), and the vulnerability must live inside a normal-looking feature, not be artificially exposed.
-
-<scenario_examples_by_class>
-  <example class="SQL Injection">
-    NovaTech HR Portal — an internal employee management system. Employees log in to view their payslips. The admin panel search feature is injectable. Objective: extract credentials from the `users` table.
-  </example>
-  <example class="Stored XSS">
-    PulseBoard — a community feedback platform for a SaaS product. Users submit bug reports; an admin reviews them. Objective: steal the admin session cookie via stored XSS.
-  </example>
-  <example class="SSRF">
-    ImgProxy SaaS — a startup's image resizing service. Customers submit image URLs to be resized server-side with no validation. Objective: reach the AWS EC2 metadata endpoint at 169.254.169.254.
-  </example>
-  <example class="LFI">
-    DocuView Pro — a document management portal for a law firm. Users preview uploaded documents via a `?file=` parameter. Objective: read /etc/passwd, then config files containing DB credentials.
-  </example>
-  <example class="RCE via File Upload">
-    MediShare — a medical imaging platform. Radiologists upload DICOM files for review. The upload accepts any file type. Objective: upload a webshell and gain RCE.
-  </example>
-  <example class="XXE">
-    SupplySync — a B2B procurement platform. Partners submit purchase orders as XML. The parser has external entities enabled. Objective: read internal files or trigger SSRF.
-  </example>
-  <example class="Command Injection">
-    NetDiag — a network diagnostics tool for ISP technicians. Input goes unsanitised into a shell command. Objective: RCE as www-data.
-  </example>
-  <example class="Insecure Deserialization">
-    LogiTrack — a logistics shipment-tracking portal in Java. Session tokens are serialized Java objects. Objective: RCE via gadget chain.
-  </example>
-</scenario_examples_by_class>
 
 Apply the same narrative depth to ANY vulnerability requested: IDOR, SSTI, Path Traversal, Open Redirect, JWT, CORS misconfiguration, GraphQL introspection abuse, prototype pollution, NoSQL injection, etc.
 </scenario_design>
@@ -142,6 +175,23 @@ If the lab includes a flag file: its path and permissions MUST be reachable by t
 <config_files>
 Every directive you write in nginx.conf, php.ini, apache config, cupsd.conf, etc. must exist in the official documentation of the exact version installed. Never invent directives. If unsure, omit the directive and leave a `#` comment explaining why.
 </config_files>
+
+<mysql_user_grants>
+The MySQL Docker image auto-grants MYSQL_USER access to MYSQL_DATABASE ONLY.
+These two values MUST be identical everywhere they appear:
+  - The MYSQL_DATABASE env var on the db service
+  - Every USE statement and CREATE TABLE in init.sql
+  - The DB_NAME (or equivalent) env var on the app service
+  - Every PDO DSN / connection string in application code
+
+Never add a manual CREATE USER or GRANT in init.sql — the official image
+handles this. A manual CREATE USER for the same user the image creates will
+cause "Access denied" or "user already exists" errors.
+
+Self-check: grep every occurrence of the database name across all generated
+files. If any two occurrences differ by even one character (case, underscore
+vs hyphen), fix them before emitting the script.
+</mysql_user_grants>
 </technical_standards>
 
 <cve_protocol>
@@ -272,6 +322,12 @@ Application
 - Dependency manifests (`requirements.txt`, `package.json`, `composer.json`) exist and are version-pinned
 - The app binds to `0.0.0.0`
 - The DB init script seeds ≥10 realistic deterministic records
+- Every credential required to reach the vulnerable feature is either
+  (a) not required at all (unauthenticated entry point), or
+  (b) displayed in a visible credentials panel on the landing page
+- Every reference to the database name (MYSQL_DATABASE, DB_NAME, USE statement,
+  DSN string) is byte-for-byte identical across all files
+- No manual CREATE USER in init.sql when MYSQL_USER/MYSQL_PASSWORD are set
 
 Vulnerability
 - The vulnerability is actually exploitable in the running application, not just present in dead code
@@ -416,6 +472,8 @@ echo "[+] Lab ready. Run: cd pulseboard_xss_lab && docker compose up --build"
 5. Run the <self_validation> checklist mentally before producing the script. Fix any issue silently before output.
 6. When a decision must be made, apply the <defaults> table silently.
 7. The only allowed exception to the bash-script-only rule is a CVE refusal, which follows <cve_refusal_protocol> exactly.
+8. The student must never be blocked by unknown credentials. Re-read
+   <access_design> and verify Rule A or Rule B+C applies to your scenario.
 
 On user input, design the scenario, run validation, emit the script. Nothing else.
 </final_reminders>

@@ -7,7 +7,8 @@ from pathlib import Path
 # System prompt injected before every user message.
 # Edit system_prompt.md to change the LLM's behaviour.
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text(encoding="utf-8")
+SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
+README_SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "readme_prompt.md").read_text(encoding="utf-8")
 # ---------------------------------------------------------------------------
 
 
@@ -51,3 +52,46 @@ def query_ollama(prompt: str, ip: str, port: str, model: str) -> str:
     )
     response.raise_for_status()
     return response.json()["message"]["content"]
+
+
+
+
+def generate_readme(script_content: str, script_filename: str, backend: str, **kwargs) -> str:
+    """Call the LLM to produce a professor-facing README from the raw lab script."""
+    user_message = f"Script filename: {script_filename}\n\n```bash\n{script_content}\n```"
+
+    if backend == "anthropic":
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY is not set")
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1000,
+            system=README_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        return msg.content[0].text
+
+    elif backend == "ollama":
+        ip    = kwargs.get("ip", "")
+        port  = kwargs.get("port", "11434")
+        model = kwargs.get("model", "")
+        url   = f"http://{ip}:{port}/api/chat"
+        response = requests.post(
+            url,
+            json={
+                "model": model,
+                "stream": False,
+                "messages": [
+                    {"role": "system", "content": README_SYSTEM_PROMPT},
+                    {"role": "user",   "content": user_message},
+                ],
+                "options": {"num_ctx": 32768, "num_predict": 1000, "temperature": 0.2},
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        return response.json()["message"]["content"]
+
+    raise ValueError(f"Unknown backend: {backend}")
